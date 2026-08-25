@@ -1,51 +1,13 @@
-# Exam Writing Checker AI — быстрый запуск
+# Exam Writing Checker AI — OpenRouter Free
 
-Цель MVP: Telegram-бот принимает условие и работу ученика, отправляет их в OpenAI API и возвращает проверку.
+Бесплатная версия MVP.
 
-## Что уже есть
-- ОГЭ 35
-- ЕГЭ 37
-- ЕГЭ 38
-- условие задания → работа ученика
-- текст или фото
-- технический подсчёт слов
-- проверка через OpenAI API
-- баллы, ошибки, комментарий ученику
-- «следующая работа по тому же заданию»
-- «новое задание»
+## Railway variables
+- TELEGRAM_BOT_TOKEN
+- OPENROUTER_API_KEY
+- OPENROUTER_MODEL=openrouter/free
 
-## Для запуска нужны только 2 секрета
-1. TELEGRAM_BOT_TOKEN — уже получен в BotFather.
-2. OPENAI_API_KEY — создаётся в OpenAI API Platform.
+Старые OPENAI_API_KEY и OPENAI_MODEL больше не нужны.
 
-Никогда не добавляйте реальные ключи в GitHub.
-
-## Локальный тест (необязательно, если сразу деплоим)
-1. Установить Python 3.11+
-2. В папке проекта:
-   python -m venv .venv
-3. Windows:
-   .venv\Scripts\activate
-4. Установить зависимости:
-   pip install -r requirements.txt
-5. Создать файл .env рядом с bot.py:
-   TELEGRAM_BOT_TOKEN=...
-   OPENAI_API_KEY=...
-   OPENAI_MODEL=gpt-5.6
-6. Запустить:
-   python bot.py
-
-## Для хостинга
-Команда запуска:
+## Команда запуска
 python bot.py
-
-Переменные окружения:
-TELEGRAM_BOT_TOKEN
-OPENAI_API_KEY
-OPENAI_MODEL=gpt-5.6
-
-## Важно
-Это MVP. Перед финальной сдачей нужно:
-- финально сверить формулировки и правила подсчёта слов с ФИПИ-2026;
-- прогнать по нескольким эталонным и слабым работам;
-- при необходимости укоротить формат ответа.

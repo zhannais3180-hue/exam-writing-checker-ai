@@ -1,18 +1,15 @@
-# STATUS: MVP_CODE_READY
+# STATUS: OPENROUTER_FREE_READY
 
-Готов каркас Telegram-бота:
-- Telegram Bot API через aiogram
-- OpenAI Responses API
-- 3 типа заданий: ОГЭ 35, ЕГЭ 37, ЕГЭ 38
-- приём текста и фото
-- сохранение условия для следующей работы
-- подсчёт слов
-- AI-проверка
-- кнопочная навигация
+Заменить в GitHub:
+- bot.py
+- .env.example
+- README_FIRST.md
+- PROJECT_STATUS.md
 
-Следующий обязательный шаг:
-1. Получить OpenAI API key.
-2. Загрузить проект в GitHub.
-3. Подключить Bothost.
-4. Добавить TELEGRAM_BOT_TOKEN и OPENAI_API_KEY в переменные окружения.
-5. Запустить и протестировать.
+В Railway:
+- добавить OPENROUTER_API_KEY
+- добавить OPENROUTER_MODEL=openrouter/free
+- удалить OPENAI_API_KEY
+- удалить OPENAI_MODEL
+- TELEGRAM_BOT_TOKEN оставить
+- Deploy

@@ -19,20 +19,22 @@ from prompts import build_check_prompt
 load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/free")
 
 if not TELEGRAM_BOT_TOKEN:
     raise RuntimeError("Не задан TELEGRAM_BOT_TOKEN")
-if not OPENAI_API_KEY:
-    raise RuntimeError("Не задан OPENAI_API_KEY")
+if not OPENROUTER_API_KEY:
+    raise RuntimeError("Не задан OPENROUTER_API_KEY")
 
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 dp = Dispatcher()
-client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-# Для MVP храним сессию в памяти.
-# После перезапуска хостинга сессии сбросятся — для учебного проекта это допустимо.
+client = AsyncOpenAI(
+    api_key=OPENROUTER_API_KEY,
+    base_url="https://openrouter.ai/api/v1",
+)
+
 sessions: Dict[int, Dict[str, Any]] = {}
 
 TASK_NAMES = {
@@ -56,8 +58,6 @@ def result_menu():
     ])
 
 def count_words(text: str) -> int:
-    # Базовый технический подсчёт для MVP.
-    # Правила ФИПИ по сложным случаям уточняются моделью в оценивании.
     tokens = re.findall(r"[A-Za-zА-Яа-яЁё0-9]+(?:['’-][A-Za-zА-Яа-яЁё0-9]+)*", text)
     return len(tokens)
 
@@ -68,13 +68,13 @@ async def transcribe_photo(message: Message) -> str:
     await bot.download_file(file.file_path, destination=buf)
     data = base64.b64encode(buf.getvalue()).decode("utf-8")
 
-    response = await client.responses.create(
-        model=OPENAI_MODEL,
-        input=[{
+    response = await client.chat.completions.create(
+        model=OPENROUTER_MODEL,
+        messages=[{
             "role": "user",
             "content": [
                 {
-                    "type": "input_text",
+                    "type": "text",
                     "text": (
                         "Точно перепиши весь читаемый текст с изображения. "
                         "Не исправляй грамматику, лексику, орфографию или пунктуацию. "
@@ -82,13 +82,15 @@ async def transcribe_photo(message: Message) -> str:
                     ),
                 },
                 {
-                    "type": "input_image",
-                    "image_url": f"data:image/jpeg;base64,{data}",
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{data}"
+                    },
                 },
             ],
         }],
     )
-    return response.output_text.strip()
+    return (response.choices[0].message.content or "").strip()
 
 async def extract_text(message: Message) -> str | None:
     if message.text:
@@ -96,8 +98,12 @@ async def extract_text(message: Message) -> str | None:
     if message.photo:
         await message.answer("📷 Фото получила. Распознаю текст…")
         try:
-            return await transcribe_photo(message)
-        except Exception:
+            text = await transcribe_photo(message)
+            if not text:
+                raise RuntimeError("Пустой результат распознавания")
+            return text
+        except Exception as e:
+            print(f"Image recognition error: {type(e).__name__}: {e}")
             await message.answer(
                 "Не получилось надёжно прочитать фото. "
                 "Пришли, пожалуйста, эту работу текстом."
@@ -106,7 +112,6 @@ async def extract_text(message: Message) -> str | None:
     return None
 
 async def send_long(chat_id: int, text: str):
-    # Telegram ограничивает длину одного сообщения.
     limit = 3900
     while text:
         if len(text) <= limit:
@@ -213,30 +218,34 @@ async def handle_message(message: Message):
         )
 
         try:
-            response = await client.responses.create(
-                model=OPENAI_MODEL,
-                input=prompt,
+            response = await client.chat.completions.create(
+                model=OPENROUTER_MODEL,
+                messages=[{"role": "user", "content": prompt}],
             )
-            result = response.output_text.strip()
+            result = (response.choices[0].message.content or "").strip()
+            if not result:
+                raise RuntimeError("ИИ вернул пустой ответ")
         except Exception as e:
+            print(f"OpenRouter error: {type(e).__name__}: {e}")
             await message.answer(
                 "⚠️ Не удалось получить ответ от ИИ. "
-                "Проверь API-ключ и баланс OpenAI API, затем попробуй ещё раз."
+                "Попробуй ещё раз через минуту. "
+                "Если ошибка повторится — проверим логи Railway."
             )
             return
 
         await send_long(message.chat.id, result)
-        await message.answer(
-            "Что дальше?",
-            reply_markup=result_menu(),
-        )
+        await message.answer("Что дальше?", reply_markup=result_menu())
         session["step"] = "done"
         return
 
-    await message.answer("Выбери действие кнопкой ниже или нажми /start.", reply_markup=result_menu())
+    await message.answer(
+        "Выбери действие кнопкой ниже или нажми /start.",
+        reply_markup=result_menu()
+    )
 
 async def main():
-    print("Bot started")
+    print(f"Bot started with model: {OPENROUTER_MODEL}")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
