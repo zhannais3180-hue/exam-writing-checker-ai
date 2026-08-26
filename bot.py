@@ -20,7 +20,12 @@ load_dotenv()
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/free")
+OPENROUTER_MODEL = os.getenv(
+    "OPENROUTER_MODEL",
+    "google/gemma-4-26b-a4b-it:free"
+)
+
+AI_TIMEOUT_SECONDS = 90
 
 if not TELEGRAM_BOT_TOKEN:
     raise RuntimeError("Не задан TELEGRAM_BOT_TOKEN")
@@ -58,8 +63,21 @@ def result_menu():
     ])
 
 def count_words(text: str) -> int:
-    tokens = re.findall(r"[A-Za-zА-Яа-яЁё0-9]+(?:['’-][A-Za-zА-Яа-яЁё0-9]+)*", text)
+    tokens = re.findall(
+        r"[A-Za-zА-Яа-яЁё0-9]+(?:['’-][A-Za-zА-Яа-яЁё0-9]+)*",
+        text
+    )
     return len(tokens)
+
+async def call_ai(messages):
+    return await asyncio.wait_for(
+        client.chat.completions.create(
+            model=OPENROUTER_MODEL,
+            messages=messages,
+            temperature=0.2,
+        ),
+        timeout=AI_TIMEOUT_SECONDS,
+    )
 
 async def transcribe_photo(message: Message) -> str:
     photo = message.photo[-1]
@@ -68,33 +86,32 @@ async def transcribe_photo(message: Message) -> str:
     await bot.download_file(file.file_path, destination=buf)
     data = base64.b64encode(buf.getvalue()).decode("utf-8")
 
-    response = await client.chat.completions.create(
-        model=OPENROUTER_MODEL,
-        messages=[{
-            "role": "user",
-            "content": [
-                {
-                    "type": "text",
-                    "text": (
-                        "Точно перепиши весь читаемый текст с изображения. "
-                        "Не исправляй грамматику, лексику, орфографию или пунктуацию. "
-                        "Сохрани ошибки ученика. Верни только распознанный текст."
-                    ),
+    response = await call_ai([{
+        "role": "user",
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    "Точно перепиши весь читаемый текст с изображения. "
+                    "Не исправляй грамматику, лексику, орфографию или пунктуацию. "
+                    "Сохрани ошибки ученика. Верни только распознанный текст."
+                ),
+            },
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/jpeg;base64,{data}"
                 },
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{data}"
-                    },
-                },
-            ],
-        }],
-    )
+            },
+        ],
+    }])
+
     return (response.choices[0].message.content or "").strip()
 
 async def extract_text(message: Message) -> str | None:
     if message.text:
         return message.text.strip()
+
     if message.photo:
         await message.answer("📷 Фото получила. Распознаю текст…")
         try:
@@ -102,13 +119,20 @@ async def extract_text(message: Message) -> str | None:
             if not text:
                 raise RuntimeError("Пустой результат распознавания")
             return text
+        except asyncio.TimeoutError:
+            await message.answer(
+                "⚠️ ИИ слишком долго распознаёт фото. "
+                "Попробуйте ещё раз или пришлите текст."
+            )
+            return None
         except Exception as e:
             print(f"Image recognition error: {type(e).__name__}: {e}")
             await message.answer(
                 "Не получилось надёжно прочитать фото. "
-                "Пришли, пожалуйста, эту работу текстом."
+                "Пришлите, пожалуйста, эту работу текстом."
             )
             return None
+
     return None
 
 async def send_long(chat_id: int, text: str):
@@ -117,9 +141,11 @@ async def send_long(chat_id: int, text: str):
         if len(text) <= limit:
             await bot.send_message(chat_id, text)
             return
+
         cut = text.rfind("\n", 0, limit)
         if cut < 1000:
             cut = limit
+
         part, text = text[:cut], text[cut:].lstrip()
         await bot.send_message(chat_id, part)
 
@@ -136,10 +162,12 @@ async def start(message: Message):
 @dp.callback_query(F.data.startswith("task:"))
 async def choose_task(callback: CallbackQuery):
     task_key = callback.data.split(":", 1)[1]
+
     sessions[callback.from_user.id] = {
         "task_key": task_key,
         "step": "waiting_task",
     }
+
     await callback.answer()
     await callback.message.answer(
         f"✅ Выбрано: {TASK_NAMES[task_key]}\n\n"
@@ -150,9 +178,11 @@ async def choose_task(callback: CallbackQuery):
 @dp.callback_query(F.data == "same_task")
 async def same_task(callback: CallbackQuery):
     session = sessions.get(callback.from_user.id, {})
+
     if not session.get("task_text"):
         await callback.answer("Сохранённого задания нет", show_alert=True)
         return
+
     session["step"] = "waiting_student"
     await callback.answer()
     await callback.message.answer(
@@ -163,29 +193,42 @@ async def same_task(callback: CallbackQuery):
 @dp.callback_query(F.data == "new_task")
 async def new_task(callback: CallbackQuery):
     session = sessions.get(callback.from_user.id, {})
+
     if not session.get("task_key"):
         await callback.answer()
-        await callback.message.answer("Выбери тип задания:", reply_markup=main_menu())
+        await callback.message.answer(
+            "Выбери тип задания:",
+            reply_markup=main_menu()
+        )
         return
+
     session.pop("task_text", None)
     session["step"] = "waiting_task"
+
     await callback.answer()
-    await callback.message.answer("Пришли новое условие задания текстом или фотографией.")
+    await callback.message.answer(
+        "Пришли новое условие задания текстом или фотографией."
+    )
 
 @dp.callback_query(F.data == "home")
 async def home(callback: CallbackQuery):
     sessions[callback.from_user.id] = {}
     await callback.answer()
-    await callback.message.answer("Выбери тип задания:", reply_markup=main_menu())
+    await callback.message.answer(
+        "Выбери тип задания:",
+        reply_markup=main_menu()
+    )
 
 @dp.message()
 async def handle_message(message: Message):
     session = sessions.get(message.from_user.id)
+
     if not session or not session.get("step"):
         await message.answer("Нажми /start и выбери тип задания.")
         return
 
     text = await extract_text(message)
+
     if not text:
         if not message.photo:
             await message.answer("Пришли текст или фотографию.")
@@ -194,6 +237,7 @@ async def handle_message(message: Message):
     if session["step"] == "waiting_task":
         session["task_text"] = text
         session["step"] = "waiting_student"
+
         await message.answer(
             "✅ Задание сохранено.\n\n"
             "Шаг 2 из 2.\n"
@@ -218,24 +262,37 @@ async def handle_message(message: Message):
         )
 
         try:
-            response = await client.chat.completions.create(
-                model=OPENROUTER_MODEL,
-                messages=[{"role": "user", "content": prompt}],
-            )
+            response = await call_ai([
+                {"role": "user", "content": prompt}
+            ])
+
             result = (response.choices[0].message.content or "").strip()
+
             if not result:
                 raise RuntimeError("ИИ вернул пустой ответ")
+
+        except asyncio.TimeoutError:
+            await message.answer(
+                "⚠️ ИИ слишком долго отвечает. "
+                "Попробуйте повторить проверку через минуту."
+            )
+            return
+
         except Exception as e:
             print(f"OpenRouter error: {type(e).__name__}: {e}")
             await message.answer(
                 "⚠️ Не удалось получить ответ от ИИ. "
-                "Попробуй ещё раз через минуту. "
+                "Попробуйте ещё раз через минуту. "
                 "Если ошибка повторится — проверим логи Railway."
             )
             return
 
         await send_long(message.chat.id, result)
-        await message.answer("Что дальше?", reply_markup=result_menu())
+        await message.answer(
+            "Что дальше?",
+            reply_markup=result_menu()
+        )
+
         session["step"] = "done"
         return
 
