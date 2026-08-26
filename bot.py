@@ -129,7 +129,7 @@ async def send_long(chat_id: int, text: str):
 async def start(message: Message):
     sessions[message.from_user.id] = {}
     await message.answer(
-        "👋 Exam Writing Checker AI\n\nПроверяю письменные работы ОГЭ и ЕГЭ по критериям ФИПИ.\n\nВыбери тип задания:",
+        "👋 Exam Writing Checker AI\nVersion: MULTIPAGE-1\n\nПроверяю письменные работы ОГЭ и ЕГЭ по критериям ФИПИ.\n\nВыбери тип задания:",
         reply_markup=main_menu(),
     )
 
@@ -296,7 +296,7 @@ async def handle_message(message: Message):
     await message.answer("Выбери действие кнопкой ниже или нажми /start.", reply_markup=result_menu())
 
 async def main():
-    print(f"Bot started with Gemini model: {GEMINI_MODEL}")
+    print(f"Bot started with Gemini model: {GEMINI_MODEL} | Version: MULTIPAGE-1")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
