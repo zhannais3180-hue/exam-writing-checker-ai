@@ -49,6 +49,12 @@ def result_menu():
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="home")],
     ])
 
+def pages_menu():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Все страницы отправлены — проверить", callback_data="finish_pages")],
+        [InlineKeyboardButton(text="🗑 Начать загрузку заново", callback_data="reset_pages")],
+    ])
+
 def count_words(text: str) -> int:
     tokens = re.findall(r"[A-Za-zА-Яа-яЁё0-9]+(?:['’-][A-Za-zА-Яа-яЁё0-9]+)*", text)
     return len(tokens)
@@ -154,6 +160,7 @@ async def new_task(callback: CallbackQuery):
         await callback.message.answer("Выбери тип задания:", reply_markup=main_menu())
         return
     session.pop("task_text", None)
+    session["student_pages"] = []
     session["step"] = "waiting_task"
     await callback.answer()
     await callback.message.answer("Пришли новое условие задания текстом или фотографией.")
@@ -163,6 +170,85 @@ async def home(callback: CallbackQuery):
     sessions[callback.from_user.id] = {}
     await callback.answer()
     await callback.message.answer("Выбери тип задания:", reply_markup=main_menu())
+
+async def check_student_work(message: Message, session: dict, student_text: str):
+    word_count = count_words(student_text)
+
+    await message.answer(
+        f"🧮 Получено. Предварительный подсчёт: {word_count} слов.\n"
+        "Проверяю по критериям…"
+    )
+
+    prompt = build_check_prompt(
+        session["task_key"],
+        session["task_text"],
+        student_text,
+        word_count,
+    )
+
+    try:
+        result = await gemini_generate(
+            [{"text": prompt}],
+            temperature=0.2
+        )
+
+    except asyncio.TimeoutError:
+        await message.answer(
+            "⚠️ ИИ слишком долго отвечает. "
+            "Попробуйте повторить проверку через минуту."
+        )
+        return
+
+    except Exception as e:
+        print(f"Gemini error: {type(e).__name__}: {e}")
+        await message.answer(
+            "⚠️ Не удалось получить ответ от ИИ. "
+            "Попробуйте ещё раз через минуту. "
+            "Если ошибка повторится — проверим логи Railway."
+        )
+        return
+
+    disclaimer = "⚠️ Оценка ИИ носит рекомендательный характер. Итоговое решение принимает учитель."
+    if disclaimer not in result:
+        result = result.rstrip() + "\n\n" + disclaimer
+
+    await send_long(message.chat.id, result)
+    await message.answer(
+        "Что дальше?",
+        reply_markup=result_menu()
+    )
+    session["step"] = "done"
+    session["student_pages"] = []
+
+
+@dp.callback_query(F.data == "finish_pages")
+async def finish_pages(callback: CallbackQuery):
+    session = sessions.get(callback.from_user.id, {})
+    pages = session.get("student_pages") or []
+
+    if not pages:
+        await callback.answer("Сначала пришли хотя бы одну страницу", show_alert=True)
+        return
+
+    await callback.answer()
+    combined = "\n\n".join(pages)
+
+    # Используем callback.message как транспорт для ответа пользователю.
+    await check_student_work(callback.message, session, combined)
+
+
+@dp.callback_query(F.data == "reset_pages")
+async def reset_pages(callback: CallbackQuery):
+    session = sessions.get(callback.from_user.id, {})
+    session["student_pages"] = []
+    session["step"] = "waiting_student"
+
+    await callback.answer()
+    await callback.message.answer(
+        "🗑 Загруженные страницы очищены.\n"
+        "Пришли работу заново, начиная с первой страницы."
+    )
+
 
 @dp.message()
 async def handle_message(message: Message):
