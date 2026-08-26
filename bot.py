@@ -14,7 +14,7 @@ from aiogram.types import (
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
-from prompts import build_check_prompt
+from prompts2 import build_check_prompt
 
 load_dotenv()
 
