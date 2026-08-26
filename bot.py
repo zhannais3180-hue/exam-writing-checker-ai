@@ -198,6 +198,10 @@ async def handle_message(message: Message):
             await message.answer("⚠️ Не удалось получить ответ от ИИ. Попробуйте ещё раз через минуту. Если ошибка повторится — проверим логи Railway.")
             return
 
+        disclaimer = "⚠️ Оценка ИИ носит рекомендательный характер. Итоговое решение принимает учитель."
+        if disclaimer not in result:
+            result = result.rstrip() + "\n\n" + disclaimer
+
         await send_long(message.chat.id, result)
         await message.answer("Что дальше?", reply_markup=result_menu())
         session["step"] = "done"
