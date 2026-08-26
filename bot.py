@@ -129,7 +129,7 @@ async def send_long(chat_id: int, text: str):
 async def start(message: Message):
     sessions[message.from_user.id] = {}
     await message.answer(
-        "👋 Exam Writing Checker AI\nVersion: MULTIPAGE-1\n\nПроверяю письменные работы ОГЭ и ЕГЭ по критериям ФИПИ.\n\nВыбери тип задания:",
+        "👋 Exam Writing Checker AI\nVersion: MULTIPAGE-2\n\nПроверяю письменные работы ОГЭ и ЕГЭ по критериям ФИПИ.\n\nВыбери тип задания:",
         reply_markup=main_menu(),
     )
 
@@ -145,12 +145,22 @@ async def choose_task(callback: CallbackQuery):
 @dp.callback_query(F.data == "same_task")
 async def same_task(callback: CallbackQuery):
     session = sessions.get(callback.from_user.id, {})
+
     if not session.get("task_text"):
         await callback.answer("Сохранённого задания нет", show_alert=True)
         return
+
     session["step"] = "waiting_student"
+    session["student_pages"] = []
+
     await callback.answer()
-    await callback.message.answer("♻️ Используем то же задание.\nПришли следующую работу ученика текстом или фотографией.")
+    await callback.message.answer(
+        "♻️ Используем то же задание.
+"
+        "Пришли работу ученика текстом или фотографиями.
+"
+        "Если страниц несколько — отправляй их по порядку, затем нажми «Все страницы отправлены — проверить»."
+    )
 
 @dp.callback_query(F.data == "new_task")
 async def new_task(callback: CallbackQuery):
@@ -266,37 +276,45 @@ async def handle_message(message: Message):
     if session["step"] == "waiting_task":
         session["task_text"] = text
         session["step"] = "waiting_student"
-        await message.answer("✅ Задание сохранено.\n\nШаг 2 из 2.\nТеперь пришли работу ученика текстом или фотографией.")
+        session["student_pages"] = []
+
+        await message.answer(
+            "✅ Задание сохранено.
+
+"
+            "Шаг 2 из 2.
+"
+            "Теперь пришли работу ученика текстом или фотографиями.
+"
+            "Если страниц несколько — отправляй их по порядку, затем нажми «Все страницы отправлены — проверить»."
+        )
         return
 
     if session["step"] == "waiting_student":
-        student_text = text
-        word_count = count_words(student_text)
-        await message.answer(f"🧮 Получено. Предварительный подсчёт: {word_count} слов.\nПроверяю по критериям…")
-        prompt = build_check_prompt(session["task_key"], session["task_text"], student_text, word_count)
-        try:
-            result = await gemini_generate([{"text": prompt}], temperature=0.2)
-        except asyncio.TimeoutError:
-            await message.answer("⚠️ ИИ слишком долго отвечает. Попробуйте повторить проверку через минуту.")
-            return
-        except Exception as e:
-            print(f"Gemini error: {type(e).__name__}: {e}")
-            await message.answer("⚠️ Не удалось получить ответ от ИИ. Попробуйте ещё раз через минуту. Если ошибка повторится — проверим логи Railway.")
+        pages = session.setdefault("student_pages", [])
+
+        # Если работа пришла текстом — считаем её готовой и проверяем сразу.
+        if message.text:
+            await check_student_work(message, session, text)
             return
 
-        disclaimer = "⚠️ Оценка ИИ носит рекомендательный характер. Итоговое решение принимает учитель."
-        if disclaimer not in result:
-            result = result.rstrip() + "\n\n" + disclaimer
+        # Если работа пришла фотографией — сохраняем страницу и НЕ проверяем сразу.
+        if message.photo:
+            pages.append(text)
+            page_no = len(pages)
 
-        await send_long(message.chat.id, result)
-        await message.answer("Что дальше?", reply_markup=result_menu())
-        session["step"] = "done"
-        return
+            await message.answer(
+                f"✅ Страница {page_no} сохранена.
+"
+                "Можешь прислать следующую страницу или нажать кнопку ниже.",
+                reply_markup=pages_menu()
+            )
+            return
 
     await message.answer("Выбери действие кнопкой ниже или нажми /start.", reply_markup=result_menu())
 
 async def main():
-    print(f"Bot started with Gemini model: {GEMINI_MODEL} | Version: MULTIPAGE-1")
+    print(f"Bot started with Gemini model: {GEMINI_MODEL} | Version: MULTIPAGE-2")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
